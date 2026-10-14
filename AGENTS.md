@@ -1,6 +1,5 @@
-# project 개발 안내
+# Project03 개발 규칙
 
-작업 전 README.md → PROJECTS.md → docs/DEVELOPMENT.md → docs/CODE_STRUCTURE.md를 읽는다.
-현재 애플리케이션은 미구현이다. 저장소 이름만으로 목적·스택·기존 프로젝트 관계를 추정하지 않는다.
-새 구현을 추가하면 실제 구조·설정·실행/검증 방법·남은 작업을 문서에 함께 갱신한다.
-키/비밀번호/토큰/개인정보를 저장하지 않는다. 기존 변경과 branch/HEAD를 먼저 확인한다.
+README/project.json → docs/development/HANDOFF → ARCHITECTURE → ROADMAP을먼저 읽는다.
+현재sourceStatus와실제 Git파일/원본 해시를확인하며문서와소스이관/운영 적용상태를 구분한다.
+키·목적지 설정·운영 runtime/DB를 Git에 저장하지 않는다. 새 구조/API/설정/검증결과와남은과제를함께 갱신한다.

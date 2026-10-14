@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "projectId": "Project03",
+  "title": "퀀트 조회·분석 플랫폼",
+  "actualRepository": "bedeul95/project",
+  "targetRepositoryName": "Project03-Quant-Research",
+  "repositoryRenameStatus": "pending-settings-access",
+  "branch": "main",
+  "baselineCommit": "803fdec842d75d7f543c608e033e235bece0058a",
+  "version": "원본 패키지 1.4.0 / 계산 엔진 1.3.0",
+  "updatedAt": "2026-10-14",
+  "developmentBranch": "main",
+  "sourceStatus": "package-reviewed-not-imported",
+  "documents": {
+    "index": "docs/README.md",
+    "overview": "docs/guide/OVERVIEW.md",
+    "configuration": "docs/guide/CONFIGURATION.md",
+    "runbook": "docs/guide/RUNBOOK.md",
+    "handoff": "docs/development/HANDOFF.md",
+    "architecture": "docs/development/ARCHITECTURE.md",
+    "roadmap": "docs/development/ROADMAP.md",
+    "sourceIndex": "docs/reference/SOURCE_INDEX.md",
+    "symbols": "docs/reference/SYMBOLS.md"
+  }
+}
