@@ -7,6 +7,9 @@
 | 운영 | [실행 가이드](guide/RUNBOOK.md) | 로컬/배포·확인·복구 구분 |
 | 개발 | [개발 인수인계](development/HANDOFF.md) | 현재 branch·흐름·변경 진입점·보존 정책 |
 | 개발 | [상세 구조](development/ARCHITECTURE.md) | 모듈 책임·호출·DB/통신 구조 |
+| 개발 | [KR/US × 3종 TOP10 평가 설계](development/TOP10_SCORING_SPEC.md) | 저평가·기존 기술지표·알파 필터, 점수/위험/제외 사유 |
+| 개발 | [실데이터 수집·검증 계획](development/DATA_PIPELINE_AND_VALIDATION.md) | KRX/KIS/DART/Twelve Data/SEC, 거래상태·시점·커버리지 |
+| 참조 | [미검증 참고 후보](reference/PROVISIONAL_CANDIDATES_20261014.md) | 과거 답변 후보 (실제 분석 결과 아님) |
 | 개발 | [후속 과제](development/ROADMAP.md) | 우선순위·수정 파일·완료 기준 |
 | 개발 | [구조 정리 분석](development/STRUCTURE_AUDIT.md) | 현재 디렉터리 판단·실제 정리/미루는 이동 |
 | 참조 | [파일 목록](reference/SOURCE_INDEX.md) | 현재 파일·자료 출처 |

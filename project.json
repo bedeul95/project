@@ -20,6 +20,14 @@
     "architecture": "docs/development/ARCHITECTURE.md",
     "roadmap": "docs/development/ROADMAP.md",
     "sourceIndex": "docs/reference/SOURCE_INDEX.md",
-    "symbols": "docs/reference/SYMBOLS.md"
+    "symbols": "docs/reference/SYMBOLS.md",
+    "top10Scoring": "docs/development/TOP10_SCORING_SPEC.md",
+    "dataValidation": "docs/development/DATA_PIPELINE_AND_VALIDATION.md",
+    "provisionalCandidates": "docs/reference/PROVISIONAL_CANDIDATES_20261014.md"
+  },
+  "featureStatus": {
+    "krUsTop10x3": "spec-only-not-implemented",
+    "stockData": "not-live-verified",
+    "previousCandidates": "unverified-reference-only"
   }
 }

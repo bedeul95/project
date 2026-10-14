@@ -25,6 +25,14 @@
 | 조회 MCP | 저장된 분석만 stdio 조회·version1.4.0 | mcp_server.py |
 | 제외 범위 | 계좌/주문 기본 비활성·실제 인증 미검증 | broker 어댑터를 켜지 않기 |
 
+## 2026-10-14 신규 분석 요구사항 (설계 등록, 미구현)
+
+한국/미국 **각각** 저평가·기존 기술지표·첨부 알파스퀘어 전략 **3개 TOP 10**, 총 6개 랭킹 슬롯을 설계했다. 전체 상장종목 수집 및 거래정지/관리종목 제외, 최신 재무·일봉 검증, 종목코드·점수·선정 이유·위험도·데이터 출처 표기를 요구한다. 현재 Git에 실행 소스가 없으므로 **실측 순위 산출 및 기능 배포는 완료되지 않았다**.
+
+- [6개 TOP 10 평가·스크리닝 명세](docs/development/TOP10_SCORING_SPEC.md)
+- [KR/US 시장 데이터/API 연동·검증](docs/development/DATA_PIPELINE_AND_VALIDATION.md)
+- [기존 답변의 미검증 참고 후보](docs/reference/PROVISIONAL_CANDIDATES_20261014.md) (투자 추천 또는 Project03 점수 아님)
+
 ## 실행·구조·현재 과제
 
 - [개요](docs/guide/OVERVIEW.md): 기능/제품 범위와 실제 확인 근거
