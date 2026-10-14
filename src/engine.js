@@ -9,7 +9,7 @@
  const scale=(x,lo,hi)=>finite(x)?clamp((x-lo)/(hi-lo)*100):null;
  function date(d){return typeof d==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(d)&&Number.isFinite(Date.parse(d))&&new Date(d+'T00:00:00Z').toISOString().slice(0,10)===d;}
  function validate(data){
-  if(!data||data.schemaVersion!==1||!Array.isArray(data.stocks)||data.stocks.length<1||data.stocks.length>200)throw Error('schemaVersion: 1과 종목 1~200개가 필요합니다.');
+  if(!data||data.schemaVersion!==1||!Array.isArray(data.stocks)||data.stocks.length<1||data.stocks.length>20000)throw Error('schemaVersion: 1과 종목 1~20,000개가 필요합니다.');
   if(data.priceBasis!=='split-consistent')throw Error('priceBasis는 split-consistent여야 합니다. 가격·주식수·거래량의 분할 기준을 맞춰주세요.');
   if(typeof data.source!=='string'||!data.source.trim()||data.source.length>200)throw Error('데이터 출처(source)를 입력하세요.');
   if(typeof data.synthetic!=='boolean')throw Error('synthetic은 true 또는 false여야 합니다.');
@@ -87,15 +87,15 @@
   const reasons=[];if(atrPct>.06)reasons.push('ATR/종가 6% 초과');if(rsi>80)reasons.push('RSI 80 초과 · 과열');if(last<sma60*.9)reasons.push('60일 평균 대비 10% 이상 하락');
   return {ready:true,total:Object.values(parts).reduce((s,x)=>s+x,0),parts,reasons,metrics:{sma20,sma60,rsi,atr:tr,atrPct,macd:macd.at(-1),macdSignal:signal.at(-1),hist,bbPosition,bandwidth}};
  }
- function features(s,asOf,c){
-  const bars=s.bars.filter(b=>b.date<=asOf),last=bars.at(-1),f=snapshot(s,asOf),reasons=[],warnings=[];
-  if(!last||last.date!==asOf)reasons.push('평가일 가격 없음');
+ function features(s,asOf,c,priceAsOf=asOf){
+  const bars=s.bars.filter(b=>b.date<=priceAsOf),last=bars.at(-1),f=snapshot(s,asOf),reasons=[],warnings=[];
+  if(!last||last.date!==priceAsOf)reasons.push('평가일 가격 없음');
   if(!f)reasons.push('당시 공개된 재무자료 없음');
   if(s.financialSector)reasons.push('금융업 별도 모델 필요');
   const flags=(s.flags||[]).filter(x=>x.date<=asOf);
   if(flags.some(x=>['halt','accounting','delisted'].includes(x.type)))reasons.push('거래·회계 제한 플래그');
   if(flags.some(x=>x.type==='event'&&asOf>=x.date&&Date.parse(asOf)-Date.parse(x.date)<=10*86400000))warnings.push('최근 이벤트 확인');
-  const fl=flow(s.bars,asOf,c),tech=technical(s.bars,asOf,c);
+  const fl=flow(s.bars,priceAsOf,c),tech=technical(s.bars,priceAsOf,c);
   if(!f||!last)return {stock:s,f,last,flow:fl,tech,reasons,warnings,eligible:false,coverage:0,value:0,quality:0,safety:0,growth:0,fundamental:0,technical:tech.total,total:0,metrics:{}};
   for(const issue of s.dataIssues||[])reasons.push(issue);
   for(const warning of s.dataWarnings||[])warnings.push(warning);
@@ -130,16 +130,27 @@
   if(finite(f.dilution)&&f.dilution>.05)warnings.push('주식 희석 5% 초과');
   return {stock:s,f,last,flow:fl,tech,reasons,warnings,eligible:reasons.length===0,coverage:Math.min(quality.coverage,growth.coverage,safety.coverage),quality:quality.score,safety:safety.score,growth:growth.score,value:0,total:0,metrics:{marketCap,ev,fcf,roe,roic,margin,profitCV,revenueGrowth,profitGrowth,cashConversion,debtCashFlow,interestCover,earningsYield,fcfYield,opYield,per:f.netIncome>0?marketCap/f.netIncome:null,pbr:f.equity>0?marketCap/f.equity:null,evOp:ev>0&&f.operatingIncome>0?ev/f.operatingIncome:null}};
  }
- function rank(value,pool){if(!finite(value))return 0;const a=pool.filter(finite);if(!a.length)return 0;if(a.length===1)return 50;return 100*(a.filter(x=>x<value).length+.5*(a.filter(x=>x===value).length-1))/(a.length-1);}
- function screen(data,market,asOf,input={}){
+ function ranker(pool){
+  const a=pool.filter(finite).sort((x,y)=>x-y),n=a.length;
+  return value=>{if(!finite(value)||!n)return 0;if(n===1)return 50;
+   const bound=upper=>{let lo=0,hi=n;while(lo<hi){const mid=(lo+hi)>>1;if(a[mid]<value||(upper&&a[mid]===value))lo=mid+1;else hi=mid;}return lo;};
+   const lower=bound(false),upper=bound(true);return 100*(lower+.5*(upper-lower-1))/(n-1);
+  };
+ }
+ function screen(data,market,asOf,input={},priceAsOf=asOf){
   if(!['KR','US'].includes(market)||!date(asOf))throw Error('시장·평가일을 확인하세요.');const c=config(input);
-  const results=data.stocks.filter(s=>s.market===market).map(s=>features(s,asOf,c));
+  const results=data.stocks.filter(s=>s.market===market).map(s=>features(s,asOf,c,priceAsOf));
+  const eligible=results.filter(p=>p.eligible),sectorPools=new Map();
+  for(const p of eligible){if(!sectorPools.has(p.stock.sector))sectorPools.set(p.stock.sector,[]);sectorPools.get(p.stock.sector).push(p);}
+  const rankCache=new Map();
   for(const r of results){
-   let peers=results.filter(p=>p.eligible&&p.stock.sector===r.stock.sector);r.peerBasis='업종';
-   if(peers.length<5){peers=results.filter(p=>p.eligible);r.peerBasis='시장 · 업종 표본 부족';}
-   const parts=['earningsYield','fcfYield','opYield'].map(k=>finite(r.metrics[k])&&r.metrics[k]>0?rank(r.metrics[k],peers.map(p=>p.metrics[k])):0);
+   let peers=sectorPools.get(r.stock.sector)||[];r.peerBasis='업종';
+   if(peers.length<5){peers=eligible;r.peerBasis='시장 · 업종 표본 부족';}
+   if(!rankCache.has(peers)){const functions={};for(const k of ['earningsYield','fcfYield','opYield'])functions[k]=ranker(peers.map(p=>p.metrics[k]));functions.pbr=ranker(peers.map(p=>p.metrics.pbr>0?1/p.metrics.pbr:null));rankCache.set(peers,functions);}
+   const rank=rankCache.get(peers);
+   const parts=['earningsYield','fcfYield','opYield'].map(k=>finite(r.metrics[k])&&r.metrics[k]>0?rank[k](r.metrics[k]):0);
    // PBR gets less influence, and must be supported by positive ROE.
-   parts.push(r.metrics.pbr>0&&r.metrics.roe>0?rank(1/r.metrics.pbr,peers.map(p=>p.metrics.pbr>0?1/p.metrics.pbr:null)):0);
+   parts.push(r.metrics.pbr>0&&r.metrics.roe>0?rank.pbr(1/r.metrics.pbr):0);
    r.value=parts[0]*.3+parts[1]*.3+parts[2]*.3+parts[3]*.1;
    r.fundamental=(r.value*c.valueWeight+r.quality*c.qualityWeight+r.safety*c.safetyWeight+r.growth*c.growthWeight)/100;
    r.technical=r.tech.total;r.total=r.fundamental+r.technical;

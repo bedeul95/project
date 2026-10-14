@@ -1,24 +1,25 @@
-# Project03 상세 개발 인수인계
+# Project03 개발 인수인계 — 1.5.0
 
-1. current Git에는 개발 문서/원본 분석 인덱스만 있다. 다음 코드 작업은 먼저 원본1.4.0을 확인해 소스 이관 기준을 정한다.
-2. frontend engine1.3.0·read MCP1.4.0·package1.4.0의 혼합 버전을 일괄 성공/최신 엔진으로 설명하지 않는다.
-3. 기업안정70: 가치20·질20·안전20·성장10, 기술30: 거래량/횡보10·추세8·RSI/MACD6·ATR/볼린저6.
-4. 필터/자료 누락·공시 관측일·완료 일봉·분할 이후80일 제한이 점수보다 우선한다. 누락을0이나 연환산으로 채우지 않는다.
-5. Python collector는 cache/호출 예산·TwelveData fixed GET·시간대를 처리하고 Node engine은 UI/서버 동일 계산을 맡는다.
-6. 4개 연속 분기 TTM, 전년 비교8분기·actual available date·retained market 자료 시각을 보존한다.
-7. 전부 실패하면 이전 결과 유지, 부분 성공은 해당 배치의 성공 종목만 교체하고 미수집 이유를 표시한다.
-8. macOS 예약은 실행 중인 서버가 검사하며 잠자기/종료를 깨우지 않는다. 동일슬롯/폴더중복·3시간내 보충 경계를 유지한다.
-9. loopback Host/Origin/session·키 비노출·runtime 권한을 유지한다. MCP Reader는 저장 결과만 읽으며 collector 실행/주문 도구를 추가하지 않는다.
-10. broker KIS 어댑터는 보존 코드다. 현재 우선은 계좌 없이 조회/분석이고 HTTP 주문 기본 비활성을 유지한다.
-11. 수정 순서: market_data 정규화/예산 → engine 계산 → analyze bridge → read UI → saved-result MCP → 해당 tests.
-12. 소스 수정 시 build.py로 시작.html을 다시 만들고 원본 해시/버전·테스트·실제 API 검증 여부를 각각 기록한다.
+2026-10-15: 원본 ZIP의32개 파일을 SOURCE_INDEX의 SHA256과 대조하여 이관했습니다. 원본 이관 commit `18395fc`와 후속 기능 변경을 분리합니다. 원본 README는 docs/reference/ORIGINAL_README.md, 원본 해시는 SOURCE_INDEX.md에 보존합니다. 원본 키/runtime은 가져오지 않았습니다.
 
-## 후속 우선순위
+## 완료
 
-소스 Git 이관/버전 표기 → API 실제 최소표본 KR/US 권한/필드 → 공시 원자료/휴장 캘린더 →
-MCP 실제 클라이언트 handshake → macOS 예약·재시작·브라우저 확인 순서다.
-지정종목 순위를 전체 시장 순위로 해석하거나 검증 전 점수를 수익 보증으로 표현하지 않는다.
+- 기존 기업70+기술30 산식 유지. engine screen에 가격 기준일을 별도로 전달하여 미국 전일 가격과 한국시간 재무 관측일을 함께 처리합니다. 날짜 없는 기존 호출의 동작은 유지합니다.
+- 업종/시장 percentile 분포를 캐시하고 이진 탐색하여 큰 유니버스에서 반복 전체 검색을 줄입니다.
+- research.js는6개 독립 순위를 계산합니다. state gate를 먼저 적용한 종목으로 업종 비교하고 재무 누락시 null, 알파 unavailable/미충족을 구분합니다. 신호당10점의 하한·상한과 상관 경고를 반환합니다.
+- master 모드는 runtime/universe.json의 거래 가능한 보통주를 수집합니다. 발행 직전 상태 파일을 재확인하며 stale/unknown/managed/halt/delisted를 차단합니다.
+- rankings_store.py는6개 목록을 한 JSON으로 원자적 교체하고 last_success/last_verified·최근30개 이력을 유지합니다. unavailable시 과거 결과·실패 원인을 표시합니다.
+- API 세션 보호, 6개 카드·조건 근거·CSV, 읽기 전용 atlas_top10 MCP, 기존 예약·중복슬롯·예산·캐시 연결.
+- CLI import-universe / analyze-file / run / status. 서버와 CLI의 단일 프로세스 잠금을 유지합니다.
 
-## 이번 구조 정리의 검증 범위
+## 실제 데이터 연결의 남은 과제
 
-원본 ZIP의 파일/해시·Python 함수/클래스·주요 HTTP/collector/MCP/engine 선언을 확인하고 문서 링크/project.json을 검사했다. 원본 코드의 Git 이관·빌드/테스트·실제 API/계좌/주문 실행은 하지 않았다.
+API키/구독·전 시장 가격/재무 권한·공식 status/holiday 공급자와 자동 마스터 갱신은 실측하지 않았습니다. collector가 제공하는 것은 Twelve Data 지정종목 또는 가져온 master 기반 조회입니다. KIS/DART/SEC 직접 수집, 정밀 공시 대사, 전체 기업행동 보정·금융업 모델·배당 히스토리 수집은 후속입니다. 외부 공급자 정규화 JSON을 CLI로 분석할 수 있습니다.
+
+verified는 전 시장 마스터/당일 상태·달력·기업행동 검증·전략100% 완전평가가 모두 필요합니다. default watchlist와 현재 collector만으로 이를 달성했다고 보고하지 않습니다. 알파 판별불가가 있으면 점수는 하한으로 표시하고 coverage에서 완전평가로 집계하지 않습니다.
+
+## 검증
+
+[TESTING](../../TESTING.md)의 실행 명령과 실제 검사 범위를 확인하세요. 가짜 공급자 응답/합성 수학 벡터·로컬 HTTP·stdio/MCP·DOM을 검증했습니다. 실제 시세/인증/수익성, macOS LaunchAgent·Safari/Chrome 실제 화면은 미검증입니다.
+
+변경시 src를 수정하고 build.py로 시작.html을 생성한 뒤 CHECKSUMS를 갱신합니다. 새 API/설정/보류 정책과 sourceStatus를 함께 갱신하세요. 키·운영 DB·runtime을 Git에 저장하지 않습니다. broker는 보존 코드이며 기본 계좌/주문은 비활성입니다.

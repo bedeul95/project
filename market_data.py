@@ -5,10 +5,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from universe import validate_master, collection_symbols
+
 ROOT=Path(__file__).resolve().parent
 KST=ZoneInfo('Asia/Seoul');NY=ZoneInfo('America/New_York')
 COSTS={'time_series':1,'profile':10,'statistics':50,'income_statement':100,'balance_sheet':100,'cash_flow':100,'splits':20}
-DEFAULTS=dict(apiKey='',scheduled=True,morning='08:30',evening='18:30',frequency=2,
+DEFAULTS=dict(apiKey='',universeMode='watchlist',scheduled=True,morning='08:30',evening='18:30',frequency=2,
               creditsPerMinute=500,maxCreditsPerRun=1500,maxCreditsPerDay=3000,financialCacheHours=24,
               symbols=[dict(symbol='005930',mic='XKRX',market='KR'),dict(symbol='AAPL',mic='XNAS',market='US')])
 FIELDS=['revenue','operatingIncome','netIncome','equity','cfo','capex','shares','debt','cash','interest','investedCapital','taxRate','previousRevenue','previousOperatingIncome','previousMargin','dilution']
@@ -193,12 +195,13 @@ class Collector:
  def validate_config(self,value):
   if not isinstance(value,dict):raise DataError('조회 설정은 객체여야 합니다.')
   c={**copy.deepcopy(DEFAULTS),**{k:value[k] for k in DEFAULTS if k in value}}
+  if c['universeMode'] not in ['watchlist','master']:raise DataError('Universe mode must be watchlist or master')
   if not isinstance(c['apiKey'],str) or len(c['apiKey'])>200 or any(ord(x)<32 for x in c['apiKey']):raise DataError('API 키 형식 오류')
   if type(c['scheduled']) is not bool or type(c['frequency']) is not int or c['frequency'] not in [1,2]:raise DataError('스케줄 설정 오류')
   for k in ['morning','evening']:
    if not isinstance(c[k],str) or not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d',c[k]):raise DataError('시간은 HH:MM입니다.')
   if c['morning']>=c['evening']:raise DataError('아침 시간이 저녁보다 앞서야 합니다.')
-  for k,lo,hi in [('creditsPerMinute',100,10000),('maxCreditsPerRun',1,100000),('maxCreditsPerDay',1,200000),('financialCacheHours',1,48)]:
+  for k,lo,hi in [('creditsPerMinute',100,10000),('maxCreditsPerRun',1,10000000),('maxCreditsPerDay',1,20000000),('financialCacheHours',1,48)]:
    if type(c[k]) is not int or not lo<=c[k]<=hi:raise DataError('호출/캐시 한도 설정 오류: '+k)
   if not isinstance(c['symbols'],list) or not 1<=len(c['symbols'])<=200:raise DataError('분석 종목 1~200개를 입력하세요.')
   seen=set()
@@ -272,8 +275,8 @@ class Collector:
   node=self.node_path()
   if not node:raise DataError('Node.js 18+ 설치 필요 · 수집 자료는 저장됨, 자동 점수 미계산')
   payload=json.dumps(dict(data=data,asOf=asof,config=score_config),allow_nan=False).encode()
-  if len(payload)>12*1024*1024:raise DataError('분석 데이터 12MiB 한도 초과')
-  try:r=subprocess.run([node,str(ROOT/'analyze.cjs')],input=payload,capture_output=True,timeout=30)
+  if len(payload)>512*1024*1024:raise DataError('분석 데이터 512MiB 한도 초과')
+  try:r=subprocess.run([node,str(ROOT/'analyze.cjs')],input=payload,capture_output=True,timeout=600)
   except Exception:raise DataError('분석 엔진 실행 실패') from None
   if r.returncode:raise DataError('분석 엔진 입력 검증 실패 · 새 결과 미적용')
   return json.loads(r.stdout)
@@ -283,7 +286,12 @@ class Collector:
    if market not in ['ALL','KR','US']:raise DataError('수집 시장 오류')
    if self.running:raise DataError('이미 수집 중입니다.')
    if not self.config['apiKey']:raise DataError('Twelve Data API 키를 먼저 저장하세요. 증권계좌는 필요 없습니다.')
-   symbols=[s for s in self.config['symbols'] if market=='ALL' or s['market']==market]
+   master=self.read(self.directory/'universe.json',{'schemaVersion':1,'markets':{}})
+   if master['markets']:
+    try:validate_master(master,self.clock().astimezone(KST).date().isoformat())
+    except ValueError:raise DataError('Universe/status snapshot invalid; import a current validated file') from None
+   self.batchUniverse=copy.deepcopy(master['markets'])
+   symbols=collection_symbols(master,market) if self.config['universeMode']=='master' else [s for s in self.config['symbols'] if market=='ALL' or s['market']==market]
    if not symbols:raise DataError('선택 시장의 분석 종목이 없습니다.')
    if claim and claim in self.state['claims']:return dict(skipped=True)
    id=secrets.token_hex(12);now=self.clock().isoformat()
@@ -320,7 +328,10 @@ class Collector:
       raw.update(financial);raw['_financialFetchedAt']=now.isoformat()
       if errors:failures.append(dict(symbol=spec['symbol'],market=spec['market'],error='일봉 확보 · 재무 일부 실패: '+', '.join(errors)))
       if not errors and all(k in financial for k in ['splits','profile','statistics','income_statement','balance_sheet','cash_flow']):write_json(cachePath,dict(fetchedAt=now.isoformat(),raw=financial))
-     stock=normalize(spec,raw,now);successes.append(stock)
+     stock=normalize(spec,raw,now)
+     entry=next((e for e in self.batchUniverse.get(spec['market'],{}).get('entries',[]) if e['id']==stock['id']),{})
+     if 'dividend' in entry:stock['dividend']=copy.deepcopy(entry['dividend'])
+     successes.append(stock)
     except (BudgetError,AccessError) as e:
      failures.append(dict(symbol=spec['symbol'],market=spec['market'],error=str(e)));break # No quota/auth storm across the universe.
     except Exception as e:
@@ -332,12 +343,24 @@ class Collector:
    if not successes:raise DataError('성공한 종목 없음 · 기존 결과 유지')
    # Replace only this batch's markets; keep other market data with its original dates/provenance.
    old=self.latest();targetMarkets={s['market'] for s in symbols}
-   allowedIds={s['market']+'-'+s['symbol']+'-'+s['mic'] for s in self.config['symbols']}
+   allowedSymbols=collection_symbols({'markets':self.batchUniverse},'ALL') if self.config['universeMode']=='master' else self.config['symbols']
+   allowedIds={s['market']+'-'+s['symbol']+'-'+s['mic'] for s in allowedSymbols}
    preserved=[s for s in old['data']['stocks'] if s['market'] not in targetMarkets and s['id'] in allowedIds] if old else []
    stocks=preserved+successes
    for s in preserved:
     if (datetime.fromisoformat(today)-datetime.fromisoformat(s['bars'][-1]['date'])).days>7 and '가격 자료 7일 초과 지연' not in s.get('dataIssues',[]):s.setdefault('dataIssues',[]).append('가격 자료 7일 초과 지연')
    dataset=dict(schemaVersion=1,synthetic=False,source='Twelve Data · 관측일 기준 · 일부 종목 실패는 수집 기록 확인',priceBasis='split-consistent',pitPolicy='observed-only',collectedAt=now.isoformat(),analysisAsOf=today,stocks=stocks)
+   # Re-read status snapshot immediately before ranking publication.
+   refreshed=self.read(self.directory/'universe.json',{'schemaVersion':1,'markets':{}})
+   if refreshed['markets']:
+    try:validate_master(refreshed,self.clock().astimezone(KST).date().isoformat())
+    except ValueError:raise DataError('Publication status recheck failed; previous result retained') from None
+    self.batchUniverse=copy.deepcopy(refreshed['markets'])
+   oldUniverse=old['data'].get('universe',{}) if old else {}
+   dataset['universe']={m:copy.deepcopy(self.batchUniverse.get(m,{})) if m in targetMarkets else copy.deepcopy(oldUniverse.get(m,{})) for m in ['KR','US']}
+   # Watchlist mode can never claim whole-market completeness.
+   if self.config['universeMode']=='watchlist':
+    for meta in dataset['universe'].values():meta['complete']=False
    analysis=None;analysisStatus='완료'
    try:analysis=self.analyzer(dataset,today,{})
    except DataError as e:
@@ -348,8 +371,17 @@ class Collector:
    write_json(self.directory/'reports'/(job['id']+'.json'),latest)
    reports=sorted((self.directory/'reports').glob('*.json'),key=lambda p:p.stat().st_mtime,reverse=True)
    for path in reports[30:]:path.unlink()
-   with self.lock:job.update(phase='PARTIAL' if failures or analysis is None else 'DONE',completed=len(successes),note=analysisStatus,failures=failures,endedAt=self.clock().isoformat(),credits=self.run_used)
+   if analysis and analysis.get('rankings'):
+    from rankings_store import publish
+    publish(self.directory,analysis['rankings'],now)
+   else:
+    from rankings_store import publish_failure
+    publish_failure(self.directory,targetMarkets,self.clock(),analysisStatus)
+   with self.lock:job.update(phase='PARTIAL' if failures or analysis is None or any(r['status']!='verified' for r in (analysis or {}).get('rankings',[]) if r['market'] in targetMarkets) else 'DONE',completed=len(successes),note=analysisStatus,failures=failures,endedAt=self.clock().isoformat(),credits=self.run_used)
   except Exception as e:
+   from rankings_store import publish_failure
+   try:publish_failure(self.directory,{s['market'] for s in symbols},self.clock(),str(e) if isinstance(e,DataError) else 'Collection failed; previous result retained')
+   except (OSError,ValueError):pass
    with self.lock:job.update(phase='FAILED',note=str(e) if isinstance(e,DataError) else '수집 처리 실패 · 이전 결과 유지',failures=failures,credits=self.run_used,endedAt=self.clock().isoformat())
   finally:
    with self.lock:self.running=False;write_json(self.statePath,self.state)

@@ -158,7 +158,7 @@ def smoke_test(root=ROOT):
         replies = [json.loads(line) for line in result.stdout.splitlines()]
         tools = replies[1]['result']['tools']
         status = json.loads(replies[2]['result']['content'][0]['text'])
-        if result.returncode or len(replies) != 3 or len(tools) != 5 or status.get('readOnly') is not True:
+        if result.returncode or len(replies) != 3 or len(tools) != 6 or status.get('readOnly') is not True:
             raise ValueError()
     except (ValueError, KeyError, IndexError):
         raise InstallError('ATLAS MCP 자체 검사 실패. 클라이언트 설정을 변경하지 않았습니다.') from None

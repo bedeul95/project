@@ -16,7 +16,7 @@
  const scale=(x,lo,hi)=>finite(x)?clamp((x-lo)/(hi-lo)*100):null;
  function date(d){return typeof d==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(d)&&Number.isFinite(Date.parse(d))&&new Date(d+'T00:00:00Z').toISOString().slice(0,10)===d;}
  function validate(data){
-  if(!data||data.schemaVersion!==1||!Array.isArray(data.stocks)||data.stocks.length<1||data.stocks.length>200)throw Error('schemaVersion: 1과 종목 1~200개가 필요합니다.');
+  if(!data||data.schemaVersion!==1||!Array.isArray(data.stocks)||data.stocks.length<1||data.stocks.length>20000)throw Error('schemaVersion: 1과 종목 1~20,000개가 필요합니다.');
   if(data.priceBasis!=='split-consistent')throw Error('priceBasis는 split-consistent여야 합니다. 가격·주식수·거래량의 분할 기준을 맞춰주세요.');
   if(typeof data.source!=='string'||!data.source.trim()||data.source.length>200)throw Error('데이터 출처(source)를 입력하세요.');
   if(typeof data.synthetic!=='boolean')throw Error('synthetic은 true 또는 false여야 합니다.');
@@ -94,15 +94,15 @@
   const reasons=[];if(atrPct>.06)reasons.push('ATR/종가 6% 초과');if(rsi>80)reasons.push('RSI 80 초과 · 과열');if(last<sma60*.9)reasons.push('60일 평균 대비 10% 이상 하락');
   return {ready:true,total:Object.values(parts).reduce((s,x)=>s+x,0),parts,reasons,metrics:{sma20,sma60,rsi,atr:tr,atrPct,macd:macd.at(-1),macdSignal:signal.at(-1),hist,bbPosition,bandwidth}};
  }
- function features(s,asOf,c){
-  const bars=s.bars.filter(b=>b.date<=asOf),last=bars.at(-1),f=snapshot(s,asOf),reasons=[],warnings=[];
-  if(!last||last.date!==asOf)reasons.push('평가일 가격 없음');
+ function features(s,asOf,c,priceAsOf=asOf){
+  const bars=s.bars.filter(b=>b.date<=priceAsOf),last=bars.at(-1),f=snapshot(s,asOf),reasons=[],warnings=[];
+  if(!last||last.date!==priceAsOf)reasons.push('평가일 가격 없음');
   if(!f)reasons.push('당시 공개된 재무자료 없음');
   if(s.financialSector)reasons.push('금융업 별도 모델 필요');
   const flags=(s.flags||[]).filter(x=>x.date<=asOf);
   if(flags.some(x=>['halt','accounting','delisted'].includes(x.type)))reasons.push('거래·회계 제한 플래그');
   if(flags.some(x=>x.type==='event'&&asOf>=x.date&&Date.parse(asOf)-Date.parse(x.date)<=10*86400000))warnings.push('최근 이벤트 확인');
-  const fl=flow(s.bars,asOf,c),tech=technical(s.bars,asOf,c);
+  const fl=flow(s.bars,priceAsOf,c),tech=technical(s.bars,priceAsOf,c);
   if(!f||!last)return {stock:s,f,last,flow:fl,tech,reasons,warnings,eligible:false,coverage:0,value:0,quality:0,safety:0,growth:0,fundamental:0,technical:tech.total,total:0,metrics:{}};
   for(const issue of s.dataIssues||[])reasons.push(issue);
   for(const warning of s.dataWarnings||[])warnings.push(warning);
@@ -137,16 +137,27 @@
   if(finite(f.dilution)&&f.dilution>.05)warnings.push('주식 희석 5% 초과');
   return {stock:s,f,last,flow:fl,tech,reasons,warnings,eligible:reasons.length===0,coverage:Math.min(quality.coverage,growth.coverage,safety.coverage),quality:quality.score,safety:safety.score,growth:growth.score,value:0,total:0,metrics:{marketCap,ev,fcf,roe,roic,margin,profitCV,revenueGrowth,profitGrowth,cashConversion,debtCashFlow,interestCover,earningsYield,fcfYield,opYield,per:f.netIncome>0?marketCap/f.netIncome:null,pbr:f.equity>0?marketCap/f.equity:null,evOp:ev>0&&f.operatingIncome>0?ev/f.operatingIncome:null}};
  }
- function rank(value,pool){if(!finite(value))return 0;const a=pool.filter(finite);if(!a.length)return 0;if(a.length===1)return 50;return 100*(a.filter(x=>x<value).length+.5*(a.filter(x=>x===value).length-1))/(a.length-1);}
- function screen(data,market,asOf,input={}){
+ function ranker(pool){
+  const a=pool.filter(finite).sort((x,y)=>x-y),n=a.length;
+  return value=>{if(!finite(value)||!n)return 0;if(n===1)return 50;
+   const bound=upper=>{let lo=0,hi=n;while(lo<hi){const mid=(lo+hi)>>1;if(a[mid]<value||(upper&&a[mid]===value))lo=mid+1;else hi=mid;}return lo;};
+   const lower=bound(false),upper=bound(true);return 100*(lower+.5*(upper-lower-1))/(n-1);
+  };
+ }
+ function screen(data,market,asOf,input={},priceAsOf=asOf){
   if(!['KR','US'].includes(market)||!date(asOf))throw Error('시장·평가일을 확인하세요.');const c=config(input);
-  const results=data.stocks.filter(s=>s.market===market).map(s=>features(s,asOf,c));
+  const results=data.stocks.filter(s=>s.market===market).map(s=>features(s,asOf,c,priceAsOf));
+  const eligible=results.filter(p=>p.eligible),sectorPools=new Map();
+  for(const p of eligible){if(!sectorPools.has(p.stock.sector))sectorPools.set(p.stock.sector,[]);sectorPools.get(p.stock.sector).push(p);}
+  const rankCache=new Map();
   for(const r of results){
-   let peers=results.filter(p=>p.eligible&&p.stock.sector===r.stock.sector);r.peerBasis='업종';
-   if(peers.length<5){peers=results.filter(p=>p.eligible);r.peerBasis='시장 · 업종 표본 부족';}
-   const parts=['earningsYield','fcfYield','opYield'].map(k=>finite(r.metrics[k])&&r.metrics[k]>0?rank(r.metrics[k],peers.map(p=>p.metrics[k])):0);
+   let peers=sectorPools.get(r.stock.sector)||[];r.peerBasis='업종';
+   if(peers.length<5){peers=eligible;r.peerBasis='시장 · 업종 표본 부족';}
+   if(!rankCache.has(peers)){const functions={};for(const k of ['earningsYield','fcfYield','opYield'])functions[k]=ranker(peers.map(p=>p.metrics[k]));functions.pbr=ranker(peers.map(p=>p.metrics.pbr>0?1/p.metrics.pbr:null));rankCache.set(peers,functions);}
+   const rank=rankCache.get(peers);
+   const parts=['earningsYield','fcfYield','opYield'].map(k=>finite(r.metrics[k])&&r.metrics[k]>0?rank[k](r.metrics[k]):0);
    // PBR gets less influence, and must be supported by positive ROE.
-   parts.push(r.metrics.pbr>0&&r.metrics.roe>0?rank(1/r.metrics.pbr,peers.map(p=>p.metrics.pbr>0?1/p.metrics.pbr:null)):0);
+   parts.push(r.metrics.pbr>0&&r.metrics.roe>0?rank.pbr(1/r.metrics.pbr):0);
    r.value=parts[0]*.3+parts[1]*.3+parts[2]*.3+parts[3]*.1;
    r.fundamental=(r.value*c.valueWeight+r.quality*c.qualityWeight+r.safety*c.safetyWeight+r.growth*c.growthWeight)/100;
    r.technical=r.tech.total;r.total=r.fundamental+r.technical;
@@ -234,10 +245,127 @@
  }
  return {VERSION,defaults,financialFields,date,validate,config,snapshot,flow,technical,screen,backtest,paperOrder,distribution,sample,validateAccount};
 });
+
+(function(root,factory){
+ const api=factory(typeof module==='object'&&module.exports?require('./engine.js'):root.Quant);
+ if(typeof module==='object'&&module.exports)module.exports=api;else root.AtlasTop10=api;
+})(typeof globalThis!=='undefined'?globalThis:this,function(Q){
+ 'use strict';
+ const VERSION='1.5.0',strategies=['value','legacy_technical','alpha_filters'];
+ const labels={value:'저평가',legacy_technical:'기존 보조지표',alpha_filters:'알파스퀘어 근사 전략'};
+ const defaults={pullbackPct:.03,turnoverRatio:2,rsiRecovery:30,minPeers:5,dividendYield:.02,maxFinancialAgeDays:200};
+ const finite=Number.isFinite,mean=a=>a.reduce((s,x)=>s+x,0)/a.length;
+ const age=(a,b)=>(Date.parse(a)-Date.parse(b))/86400000;
+ function gate(stock,meta,asOf){
+  const date=meta.expectedMarketDate;
+  if(!Q.date(date)||date>asOf)return '완료 거래일 미확인';
+  const entry=(meta.entryMap||{})[stock.id];
+  if(!entry)return '거래상태 미확인';
+  if(!Q.date(entry.statusAsOf)||entry.statusAsOf<(meta.asOf||date)||entry.statusAsOf>asOf)return '거래상태 시점 미확인';
+  if(entry.status!=='active')return '거래 제한: '+entry.status;
+  if(entry.securityType!=='Common Stock'||stock.financialSector||/reit|insurance|bank|financial/i.test(stock.sector))return '상품·업종 별도 모델 필요';
+  if(!entry.source)return '거래상태 출처 미확인';
+  if(stock.bars.filter(b=>b.date<=date).at(-1)?.date!==date)return '완료 거래일 가격 누락';
+  if(stock.bars.filter(b=>b.date<=date).length<80)return '완료 일봉 80개 미만';
+  if((stock.dataIssues||[]).some(x=>/분할|가격|일봉|OHLCV/.test(x)))return '가격·기업행동 검증 보류';
+  if((stock.flags||[]).some(f=>f.date<=asOf&&['halt','accounting','delisted'].includes(f.type)))return '거래·회계 제한 플래그';
+  return null;
+ }
+ function risk(row,date){
+  const bars=row.stock.bars.filter(b=>b.date<=date).slice(-252);
+  let peak=0,mdd=0;for(const b of bars){peak=Math.max(peak,b.close);mdd=Math.min(mdd,b.close/peak-1);}
+  const atr=row.tech.metrics.atrPct,debt=row.metrics.debtCashFlow,cover=row.metrics.interestCover;
+  const values={atr_pct:atr,max_drawdown:mdd,observed_bars:bars.length,debt_cfo:debt,interest_cover:cover,average_turnover:row.flow.tradedValue};
+  if(![atr,debt,cover,row.flow.tradedValue].every(finite))return {risk_level:'평가불가',risk_reasons:['위험 평가에 필요한 재무·가격 자료 부족'],risk_metrics:values};
+  const reasons=[];
+  if(atr>.06)reasons.push('ATR/종가 6% 초과');if(mdd<-.4)reasons.push('252일 내 최대낙폭 40% 초과');
+  if(debt>8||cover<2)reasons.push('재무부담 높음');
+  if(row.warnings.includes('최근 이벤트 확인'))reasons.push('최근 이벤트 확인');
+  let level=reasons.length?'높음':atr>.03||mdd<-.2||debt>4?'보통':'낮음';
+  if(level==='보통')reasons.push('ATR 3%·낙폭 20%·부채/CFO 4배 중 경계 초과');
+  return {risk_level:level,risk_reasons:reasons,risk_metrics:values};
+ }
+ function alpha(row,peers,date,c){
+  const s=row.stock,a=s.bars.filter(b=>b.date<=date),close=a.map(b=>b.close),last=a.at(-1),prev=a.at(-2),t=row.tech.metrics;
+  const sma=(n,offset=0)=>close.length>=n+offset?mean(close.slice(close.length-n-offset,close.length-offset)):null;
+  const volumeMean=mean(a.slice(-21,-1).map(b=>b.volume)),vol=volumeMean>0?last.volume/volumeMean:null;
+  // No exact exchange turnover is implied by close * volume.
+  const turnover=b=>b.turnover??b.close*b.volume;
+  const turnBase=mean(a.slice(-21,-1).map(turnover)),turn=turnBase>0?turnover(last)/turnBase:null;
+  const previousTech=Q.technical(a.slice(0,-1),prev.date),p=previousTech.metrics;
+  const details=[];
+  function signal(name,known,matched,observed,rule){details.push({name,status:known?(matched?'matched':'not_matched'):'unavailable',weight:10,feature_name:name,observed_value:observed,rule_threshold:rule,period:'완료 일봉 / 관측 재무',as_of:date,source:s.source||'Twelve Data'});}
+  signal('상승 추세 눌림목',finite(sma(60,20)),sma(20)>sma(60)&&sma(60)>sma(60,20)&&Math.abs(last.close/sma(20)-1)<=c.pullbackPct&&last.close/prev.close>=.95,{sma20:sma(20),sma60:sma(60),distance:last.close/sma(20)-1},'SMA20>SMA60, SMA60 상승, ±'+c.pullbackPct*100+'%, 당일 -5% 이상');
+  const high=a.length>=253?Math.max(...close.slice(-253,-1)):null;
+  signal('신고가 돌파 모멘텀',finite(high)&&finite(vol),last.close>high&&vol>1,{prior_252_high:high,close:last.close,volume_ratio:vol},'직전252일 최고종가 돌파, 거래량>20일평균');
+  signal('정배열 추세 지속',finite(sma(120)),sma(5)>sma(20)&&sma(20)>sma(60)&&sma(60)>sma(120)&&sma(20)>sma(20,1),{sma5:sma(5),sma20:sma(20),sma60:sma(60),sma120:sma(120)},'5>20>60>120, SMA20 상승');
+  signal('골든크로스',finite(vol),sma(5,1)<=sma(20,1)&&sma(5)>sma(20)&&last.close>sma(20)&&vol>=1,{previous5:sma(5,1),previous20:sma(20,1),sma5:sma(5),sma20:sma(20),volume_ratio:vol},'SMA5 상향교차 SMA20, 종가>SMA20, 거래량>=평균');
+  signal('거래대금 급증',finite(turn),turn>=c.turnoverRatio&&last.close>prev.close,{turnover_ratio:turn,proxy:!finite(last.turnover)},'거래대금(미제공시 종가×거래량 근사) >= '+c.turnoverRatio+'배, 상승');
+  signal('단기 상승 모멘텀',finite(vol),last.close>close.at(-6)&&last.close>prev.close&&vol>1,{return5:last.close/close.at(-6)-1,volume_ratio:vol},'5일 수익률>0, 당일상승, 거래량>평균');
+  signal('RSI 과매도 반등',finite(p.rsi),p.rsi<=c.rsiRecovery&&t.rsi>c.rsiRecovery&&last.close>prev.close,{previous:p.rsi,current:t.rsi},'Wilder RSI14 '+c.rsiRecovery+' 상향돌파, 종가 회복');
+  signal('MACD 추세 전환',finite(p.hist),p.hist<=0&&t.hist>0&&last.close>sma(20),{previous_hist:p.hist,hist:t.hist},'MACD12/26/9 상향교차, 종가>SMA20');
+  const valuePeers=peers._sectorPeers?.get(s.sector)||peers.filter(r=>r.stock.sector===s.sector&&r.eligible&&r.coverage===1);
+  const median=k=>{if(valuePeers._medians&&k in valuePeers._medians)return valuePeers._medians[k];const v=valuePeers.map(r=>r.metrics[k]).filter(finite).sort((a,b)=>a-b);return v.length? v.length%2?v[(v.length-1)/2]:(v[v.length/2-1]+v[v.length/2])/2:null;};
+  const financial= row.eligible&&row.coverage===1&&row.f&&age(date,row.f.periodEnd)<=c.maxFinancialAgeDays;
+  const valueKnown=financial&&valuePeers.length>=c.minPeers;
+  signal('저평가 우량주',valueKnown,row.metrics.per<median('per')&&row.metrics.pbr<median('pbr')&&row.metrics.roe>.1&&row.metrics.fcf>0,{per:row.metrics.per,pbr:row.metrics.pbr,peer_per:median('per'),peer_pbr:median('pbr'),roe:row.metrics.roe,fcf:row.metrics.fcf},'업종 표본≥'+c.minPeers+', PER/PBR 업종중앙값 미만, ROE>10%, FCF>0');
+  const d=s.dividend;
+  const dividendKnown=!!(financial&&d&&d.confirmed===true&&Q.date(d.availableAt)&&d.availableAt<=row.asOf&&Q.date(d.asOf)&&d.asOf===date&&finite(d.yield)&&d.yield>=0&&d.yield<=1&&Number.isInteger(d.yearsPaid)&&d.yearsPaid>=0&&finite(d.payoutRatio)&&d.source);
+  signal('배당주',dividendKnown,dividendKnown&&d.yield>=c.dividendYield&&d.yearsPaid>=3&&d.payoutRatio>0&&d.payoutRatio<=1&&row.metrics.fcf>0,d||null,'확정배당 수익률≥'+c.dividendYield*100+'%, 3년지속, 지급률0~100%, FCF>0');
+  const matched=details.filter(d=>d.status==='matched').length,unknown=details.filter(d=>d.status==='unavailable').length;
+  return {score:matched*10,score_upper_bound:(matched+unknown)*10,unknown_count:unknown,matched_count:matched,signal_details:details};
+ }
+ function generate(data,asOf,config={},alphaConfig={}){
+  Q.validate(data);if(!Q.date(asOf))throw Error('Invalid analysis date');
+  const c={...defaults,...alphaConfig};
+  for(const k of Object.keys(defaults))if(!finite(c[k])||c[k]<=0)throw Error('Invalid alpha setting: '+k);
+  if(c.pullbackPct>1||c.rsiRecovery>100||c.dividendYield>1||!Number.isInteger(c.minPeers))throw Error('Alpha setting out of range');
+  const lists=[],legacy=[];
+  for(const market of ['KR','US']){
+   const meta=data.universe?.[market]||{},entries=meta.entries||[],entryMap=Object.fromEntries(entries.map(e=>[e.id,e]));
+   const m={...meta,entryMap},date=meta.expectedMarketDate||data.stocks.filter(s=>s.market===market).map(s=>s.bars.at(-1)?.date).filter(Boolean).sort().at(-1)||null;
+   const reasons={},excluded={},countReason=x=>{reasons[x]=(reasons[x]||0)+1;};
+   for(const e of entries){if(e.status!=='active'||e.securityType!=='Common Stock'){const k=e.status!=='active'?e.status:e.securityType;excluded[k]=(excluded[k]||0)+1;}}
+   const target=data.stocks.filter(s=>s.market===market),accepted=[];
+   for(const s of target){const reason=gate(s,{...m,expectedMarketDate:date},asOf);if(reason)countReason(reason);else accepted.push(s);}
+   const eligibleEntries=entries.filter(e=>e.status==='active'&&e.securityType==='Common Stock');
+   const denomin=entries.length?eligibleEntries.length:target.length;
+   const calculated=accepted.length?Q.screen({...data,stocks:accepted},market,asOf,config,date):[];
+   for(const r of calculated)r.asOf=asOf;
+   legacy.push(...Q.screen(data,market,asOf,config,date||asOf));
+   const candidates=calculated.filter(r=>r.tech.ready&&r.flow.tradedValue>=(market==='KR'?Q.config(config).minTurnoverKR:Q.config(config).minTurnoverUS));
+   const missing=Math.max(0,denomin-accepted.length);if(missing)reasons['유니버스 대비 미수집·공통평가 보류']=missing;
+   const fundamental=r=>r.eligible&&r.coverage===1&&age(asOf,r.f.periodEnd)<=c.maxFinancialAgeDays;
+   candidates._sectorPeers=new Map();
+   for(const r of candidates.filter(r=>r.eligible&&r.coverage===1)){const k=r.stock.sector;if(!candidates._sectorPeers.has(k))candidates._sectorPeers.set(k,[]);candidates._sectorPeers.get(k).push(r);}
+   for(const peers of candidates._sectorPeers.values()){peers._medians={};for(const k of ['per','pbr']){const v=peers.map(r=>r.metrics[k]).filter(finite).sort((a,b)=>a-b);peers._medians[k]=v.length?v.length%2?v[(v.length-1)/2]:(v[v.length/2-1]+v[v.length/2])/2:null;}}
+   const alphaMap=new Map(candidates.map(r=>[r.stock.id,alpha(r,candidates,date,c)]));
+   for(const strategy of strategies){
+    const evaluate=r=>strategy==='value'?fundamental(r):strategy==='alpha_filters'?alphaMap.get(r.stock.id).unknown_count===0:true;
+    const evaluated=candidates.filter(evaluate).length;
+    const selectable=candidates.filter(r=>strategy==='value'?fundamental(r):strategy==='alpha_filters'?alphaMap.get(r.stock.id).matched_count>0:true);
+    const score=r=>strategy==='value'?r.fundamental/70*100:strategy==='legacy_technical'?r.technical/30*100:alphaMap.get(r.stock.id).score;
+    const coverage=denomin?evaluated/denomin:0;
+    const scopeFresh=meta.complete===true&&Q.date(meta.asOf)&&meta.asOf>=date&&meta.asOf===asOf&&age(asOf,date)<=7;
+    const verified=!data.synthetic&&scopeFresh&&coverage===1&&Object.keys(reasons).length===0&&!!meta.source&&!!meta.calendarSource&&data.priceAdjustmentPolicy==='corporate-actions-verified';
+    selectable.sort((a,b)=>score(b)-score(a)||b.coverage-a.coverage||b.flow.tradedValue-a.flow.tradedValue||a.tech.metrics.atrPct-b.tech.metrics.atrPct||a.stock.id.localeCompare(b.stock.id));
+    const rows=selectable.slice(0,10).map((r,i)=>{
+     const al=alphaMap.get(r.stock.id),knownFundamental=fundamental(r);
+     const evidence=(name,value,rule)=>({feature_name:name,observed_value:value,rule_threshold:rule,period:r.f?.periodEnd,as_of:date,source:data.source});
+     const details=strategy==='alpha_filters'?al.signal_details:strategy==='value'?[evidence('기업70',r.fundamental,'기업점수 내림차순'),evidence('가치·수익성·안정·성장',{value:r.value,quality:r.quality,safety:r.safety,growth:r.growth},'가중치20/20/20/10'),evidence('PER/PBR/ROE/FCF',{per:r.metrics.per,pbr:r.metrics.pbr,roe:r.metrics.roe,fcf:r.metrics.fcf},r.peerBasis),evidence('이자보상·부채/CFO',{interest_cover:r.metrics.interestCover,debt_cfo:r.metrics.debtCashFlow},'이자보상≥2, 부채/CFO≤8')]:[evidence('기술30',r.technical,'거래량10·추세8·모멘텀6·변동성6'),evidence('기술 배점',r.tech.parts,'세부 배점 합계'),evidence('RSI/MACD/ATR',r.tech.metrics,'Wilder RSI14, MACD12/26/9, ATR14'),evidence('거래량 배수',r.flow.ratio,'과거20일 대비 최근5일')];
+     return {rank:i+1,id:r.stock.id,name:r.stock.name,symbol:r.stock.symbol||r.stock.id,exchange:r.stock.mic||entryMap[r.stock.id]?.mic,market,score:score(r),score_scale:100,fundamental_70:knownFundamental?r.fundamental:null,technical_30:r.technical,total_100:knownFundamental?r.total:null,signal_details:details,...risk(r,date),data_as_of:date,financial_available_at:r.f?.availableAt,source:data.source,score_meaning:strategy==='alpha_filters'&&al.unknown_count?'확인된 신호의 하한 점수 · 판별불가 신호 별도':'관측자료 점수',...(strategy==='alpha_filters'?{score_upper_bound:al.score_upper_bound,unknown_signal_count:al.unknown_count}:{}),warnings:[...r.warnings,...(strategy==='alpha_filters'&&al.matched_count>1?['가격 이벤트 신호 중복·상관 위험']:[])]};
+    });
+    lists.push({market,strategy,label:labels[strategy],status:rows.length?(verified?'verified':'partial'):'unavailable',title:verified?'전체시장 TOP 10':'조회 성공 표본 TOP 10 (전체시장 순위 아님)',as_of_market_close:date,generated_at:data.collectedAt||asOf,universe_count:entries.length||target.length,eligible_count:denomin,prices_covered_count:accepted.length,fundamentals_covered_count:candidates.filter(fundamental).length,fully_scored_count:evaluated,coverage_rate:coverage,exclude_reasons:reasons,excluded_count_by_reason:excluded,algorithm_version:VERSION,engine_version:Q.VERSION,source_provenance:[data.source,meta.source].filter(Boolean),source_snapshots:{universe_as_of:meta.asOf||null,calendar_source:meta.calendarSource||null,price_adjustment_policy:data.priceAdjustmentPolicy||'split-consistent-only',status_sources:[...new Set(entries.map(e=>e.source).filter(Boolean))]},is_full_market_ranking:verified,synthetic:data.synthetic,config:c,data_quality_notes:[...(!meta.complete?['전체 유니버스 미확보']:[]),...(data.priceAdjustmentPolicy!=='corporate-actions-verified'?['기업행동 전체 보정 검증 미완료']:[]),...(meta.asOf!==asOf?['분석일 기준 거래상태 미갱신']:[]),...(data.synthetic?['합성 검증자료']:[])],shortfall_reason:rows.length<10?'10종목 미충족 · 조건 또는 자료 부족':null,rows});
+   }
+  }
+  return {algorithmVersion:VERSION,engineVersion:Q.VERSION,asOf,rankings:lists,legacy};
+ }
+ return {VERSION,strategies,defaults,generate,alpha,risk};
+});
 </script><script>(function(){
  'use strict';
  const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
- const state={status:null,latest:null,busy:false,message:''};
+ const state={status:null,latest:null,busy:false,message:'',rankings:[]};
  const enabled=()=>typeof window.ATLAS_SESSION==='string'&&window.ATLAS_SESSION.length>20;
  const n=v=>Number.isFinite(v)?v.toLocaleString('ko-KR',{maximumFractionDigits:2}):'—';
  const field=(name,label,value='',type='text',attrs='')=>'<label class="field">'+label+'<input name="'+name+'" type="'+type+'" value="'+esc(value)+'" '+attrs+'></label>';
@@ -247,22 +375,25 @@
   const result=await response.json();if(!response.ok||!result.ok)throw Error(result.error||'조회 서버 요청 실패');return result.data;
  }
  const formSymbols=c=>(c.symbols||[]).map(s=>s.market+','+s.symbol+','+s.mic).join('\n');
+ function top10(){return '<div class="card" style="margin-top:20px"><h2>한국·미국 · 6개 TOP 10</h2><p class="notice-text">알파스퀘어 화면 기반 자체 근사 전략입니다. 판별불가 신호는 별도 표시하며 확인된 신호 점수는 하한입니다.</p><div class="grid-two">'+['value','legacy_technical','alpha_filters'].flatMap(strategy=>['KR','US'].map(m=>{const r=state.rankings.find(x=>x.market===m&&x.strategy===strategy),labels={value:'저평가',legacy_technical:'기존 보조지표',alpha_filters:'첨부 근사 전략'};return '<section class="card"><h3>'+m+' · '+labels[strategy]+'</h3><p>'+esc(r?.title||'미산출')+' · '+esc(r?.status||'unavailable')+'</p><p class="notice-text">마감일 '+esc(r?.as_of_market_close||'—')+' · 완전평가 '+n((r?.coverage_rate||0)*100)+'% · 대상 '+n(r?.eligible_count||0)+'개 · '+(r?.historical?'과거 저장 결과':'저장된 분석')+'</p><div class="table-wrap"><table><thead><tr><th>순위 / 기업</th><th>점수 /100</th><th>기업70 / 기술30</th><th>위험 / 근거</th></tr></thead><tbody>'+(r?.rows||[]).map(x=>'<tr><td>'+x.rank+' · '+esc(x.name)+'<br>'+esc(x.symbol)+' / '+esc(x.exchange)+'</td><td>'+n(x.score)+(x.unknown_signal_count?'<br>판별불가 '+x.unknown_signal_count+'개 · 상한 '+n(x.score_upper_bound):'')+'</td><td>'+n(x.fundamental_70)+' / '+n(x.technical_30)+'</td><td>'+esc(x.risk_level)+'<br>'+esc(x.signal_details.filter(d=>d.status==="matched"||!d.status).map(d=>d.feature_name).join(' / '))+'<br>'+esc((x.risk_reasons||[]).join(' / '))+'<details><summary>계산 근거·출처</summary>'+x.signal_details.map(d=>'<p>'+esc(d.feature_name)+' · '+esc(d.status||'평가값')+'<br>'+esc(typeof d.observed_value==="object"?JSON.stringify(d.observed_value):d.observed_value)+'<br>'+esc(d.rule_threshold)+'<br>'+esc(d.as_of)+' / '+esc(d.source)+'</p>').join('')+'</details></td></tr>').join('')+'</tbody></table></div><p>'+esc(r?.shortfall_reason||'')+' '+esc((r?.data_quality_notes||[]).join(' / '))+'</p><button class="btn" data-action="read-ranking-export" data-market="'+m+'" data-strategy="'+strategy+'">CSV 다운로드</button></section>';})).join('')+'</div></div>'; }
  function page(){const s=state.status,c=s?.config||{scheduled:true,morning:'08:30',evening:'18:30',frequency:2,creditsPerMinute:500,maxCreditsPerRun:1500,maxCreditsPerDay:3000,financialCacheHours:24,symbols:[{market:'KR',symbol:'005930',mic:'XKRX'},{market:'US',symbol:'AAPL',mic:'XNAS'}]},latest=state.latest,rows=latest?.analysis?.rows||[],jobs=s?.jobs||[];
   return '<div class="page-head"><div><div class="eyebrow">DAILY RESEARCH / READ ONLY</div><h1>하루 두 번, 기업과 수급을 읽습니다.</h1><p>계좌 없이 시세·재무를 수집하고 기업·안정성 70점 + 기술 30점으로 분석합니다.</p></div><div class="actions"><button class="btn" data-action="read-refresh">상태·결과 새로고침</button></div></div>'+
   '<div class="banner '+(enabled()?'':'warning')+'">'+(enabled()?'조회 서버 실행 중 · '+(s?.configured?'데이터 API 키 저장됨 · 종목 권한은 수집으로 확인':'데이터 API 키 입력 필요'):'오프라인 예제 모드 · 자동 수집은 서버 실행이 필요합니다.')+'</div>'+
   '<div class="metrics">'+metric('일정',c.frequency===2?c.morning+' / '+c.evening:c.evening+' 1회','한국시간 · 서버가 실행 중일 때')+metric('분석 엔진',s?.nodeAvailable?'Node.js 확인됨':'Node.js 확인 필요','같은 70/30 엔진을 서버에서 실행')+metric('오늘 예상 사용',n(s?.creditsToday||0)+' credits','설정 한도 '+n(c.maxCreditsPerDay)+' · 제공자 과금과 다를 수 있음')+metric('최신 수집',latest?.collectedAt?.slice(0,16)||s?.lastData?.collectedAt?.slice(0,16)||'미실행',s?.running?'현재 수집 중':'화면 결과는 저장본 · 실시간 아님')+'</div>'+
   (state.message?'<div class="banner warning" role="status">'+esc(state.message)+'</div>':'')+
+  top10()+
   '<div class="grid-two"><div class="card"><div class="card-header"><h2>조회 설정</h2><span class="badge">주문 기능 비활성</span></div><form id="read-config"><div class="form-grid">'+field('apiKey','Twelve Data API Key','','password','autocomplete="new-password"')+
-  '<label class="field">하루 실행 횟수<select name="frequency"><option value="2" '+(c.frequency===2?'selected':'')+'>2회 · 아침 미국 / 저녁 한국</option><option value="1" '+(c.frequency===1?'selected':'')+'>1회 · 저녁 한국+미국</option></select></label>'+field('morning','아침 시간 (한국시간)',c.morning,'time','required')+field('evening','저녁 시간 (한국시간)',c.evening,'time','required')+field('creditsPerMinute','분당 크레딧 한도',c.creditsPerMinute,'number','min="100" max="10000" required')+field('maxCreditsPerRun','1회 수집 크레딧 한도',c.maxCreditsPerRun,'number','min="1" max="100000" required')+field('maxCreditsPerDay','하루 크레딧 한도',c.maxCreditsPerDay,'number','min="1" max="200000" required')+field('financialCacheHours','재무 캐시 유효시간',c.financialCacheHours,'number','min="1" max="48" required')+
-  '<label class="field wide">분석 종목 · 한 줄에 시장,코드,MIC<textarea name="symbols" rows="6" required style="width:100%;padding:12px;border:1px solid #dce4da;border-radius:10px">'+esc(formSymbols(c))+'</textarea></label><label class="field wide check"><input type="checkbox" name="scheduled" '+(c.scheduled?'checked':'')+'>로컬 서버가 실행 중이면 예약 수집·분석</label></div><div class="form-foot"><button class="btn primary" '+(state.busy||s?.running?'disabled':'')+'>조회 설정 저장</button></div></form><p class="notice-text">빈 키는 기존 키를 유지합니다. 증권계좌·증권사 키를 입력하지 마세요. 국내 MIC: XKRX / XKOS / XKON, 미국: XNAS / XNYS / XASE. 종목은 1~200개이며 서버 호출 한도가 실제 수집 수를 제한합니다.</p></div>'+
-  '<div><div class="card"><h2>수집·분석 실행</h2><p class="body-small">관심 종목 목록 전체를 배치로 처리합니다. 브라우저가 닫혀 있어도 로컬 서버와 Node.js가 실행되면 예약 분석합니다.</p><div class="actions"><button class="btn primary" data-action="read-run" data-market="ALL" '+(state.busy||s?.running?'disabled':'')+'>지금 양 시장 분석</button><button class="btn" data-action="read-run" data-market="KR" '+(state.busy||s?.running?'disabled':'')+'>한국</button><button class="btn" data-action="read-run" data-market="US" '+(state.busy||s?.running?'disabled':'')+'>미국</button></div><div class="divider"></div><div class="kv"><span>08:30 · 화~토</span><strong>미국 마감 자료</strong></div><div class="kv"><span>18:30 · 월~금</span><strong>한국 마감 자료</strong></div><ul class="notes"><li>1회 모드는 저녁에 양 시장을 수집합니다. 미국은 당시 완료된 최근 일봉을 사용합니다.</li><li>휴장일엔 새 자료가 없을 수 있습니다. 실제 가격일과 관측 시각을 함께 확인하세요.</li><li>일봉당 1 credit, 최초/캐시 만료 시 추가 약 380 credits/종목을 예상합니다. 하루 2회는 배치 횟수이며 API 요청 2건을 뜻하지 않습니다.</li><li>재무 권한·연속 4분기 자료가 없으면 기업점수 후보 제외 이유를 표시합니다.</li><li>맥 절전·종료 중에는 수집하지 못합니다. 지난 실행은 3시간 이내 한 번만 보충하며 지난 날짜를 연속 재실행하지 않습니다.</li></ul></div><div class="card" style="margin-top:20px"><h2>제공사 선택</h2><p class="body-small">이번 버전은 Twelve Data를 사용합니다. 한국 일봉과 미국·글로벌 자료를 같은 REST 방식으로 처리하고, 계좌 주문을 연결하지 않아도 시작할 수 있습니다.</p><p class="notice-text">한국 EOD·재무·통계는 유료 요금제와 종목별 지원 확인이 필요합니다. 개인 사용과 회사/앱 배포 권한은 다릅니다. 결제·계약은 자동으로 진행하지 않습니다.</p><a href="https://twelvedata.com/pricing" target="_blank" rel="noopener">요금·권한 확인 ↗</a> · <a href="https://twelvedata.com/exchanges?country=South+Korea" target="_blank" rel="noopener">한국 시장 범위 ↗</a></div></div></div>'+
+  '<label class="field">분석 범위<select name="universeMode"><option value="watchlist" '+(c.universeMode!=="master"?'selected':'')+'>지정 종목 표본</option><option value="master" '+(c.universeMode==="master"?'selected':'')+'>거래상태 마스터 전체</option></select></label><label class="field">하루 실행 횟수<select name="frequency"><option value="2" '+(c.frequency===2?'selected':'')+'>2회 · 아침 미국 / 저녁 한국</option><option value="1" '+(c.frequency===1?'selected':'')+'>1회 · 저녁 한국+미국</option></select></label>'+field('morning','아침 시간 (한국시간)',c.morning,'time','required')+field('evening','저녁 시간 (한국시간)',c.evening,'time','required')+field('creditsPerMinute','분당 크레딧 한도',c.creditsPerMinute,'number','min="100" max="10000" required')+field('maxCreditsPerRun','1회 수집 크레딧 한도',c.maxCreditsPerRun,'number','min="1" max="10000000" required')+field('maxCreditsPerDay','하루 크레딧 한도',c.maxCreditsPerDay,'number','min="1" max="20000000" required')+field('financialCacheHours','재무 캐시 유효시간',c.financialCacheHours,'number','min="1" max="48" required')+
+  '<label class="field wide">분석 종목 · 한 줄에 시장,코드,MIC<textarea name="symbols" rows="6" required style="width:100%;padding:12px;border:1px solid #dce4da;border-radius:10px">'+esc(formSymbols(c))+'</textarea></label><label class="field wide check"><input type="checkbox" name="scheduled" '+(c.scheduled?'checked':'')+'>로컬 서버가 실행 중이면 예약 수집·분석</label></div><div class="form-foot"><button class="btn primary" '+(state.busy||s?.running?'disabled':'')+'>조회 설정 저장</button></div></form><p class="notice-text">빈 키는 기존 키를 유지합니다. 증권계좌·증권사 키를 입력하지 마세요. 국내 MIC: XKRX / XKOS / XKON, 미국: XNAS / XNYS / XASE. 지정 종목은 1~200개, 상태 마스터는 시장별 최대 20,000개입니다. 마스터 갱신과 호출 예산·권한이 실제 분석 범위를 제한합니다.</p></div>'+
+  '<div><div class="card"><h2>수집·분석 실행</h2><p class="body-small">선택한 지정 목록 또는 거래상태 마스터의 보통주를 배치로 처리합니다. 브라우저가 닫혀 있어도 로컬 서버와 Node.js가 실행되면 예약 분석합니다.</p><div class="actions"><button class="btn primary" data-action="read-run" data-market="ALL" '+(state.busy||s?.running?'disabled':'')+'>지금 양 시장 분석</button><button class="btn" data-action="read-run" data-market="KR" '+(state.busy||s?.running?'disabled':'')+'>한국</button><button class="btn" data-action="read-run" data-market="US" '+(state.busy||s?.running?'disabled':'')+'>미국</button></div><div class="divider"></div><div class="kv"><span>08:30 · 화~토</span><strong>미국 마감 자료</strong></div><div class="kv"><span>18:30 · 월~금</span><strong>한국 마감 자료</strong></div><ul class="notes"><li>1회 모드는 저녁에 양 시장을 수집합니다. 미국은 당시 완료된 최근 일봉을 사용합니다.</li><li>휴장일엔 새 자료가 없을 수 있습니다. 실제 가격일과 관측 시각을 함께 확인하세요.</li><li>일봉당 1 credit, 최초/캐시 만료 시 추가 약 380 credits/종목을 예상합니다. 하루 2회는 배치 횟수이며 API 요청 2건을 뜻하지 않습니다.</li><li>재무 권한·연속 4분기 자료가 없으면 기업점수 후보 제외 이유를 표시합니다.</li><li>맥 절전·종료 중에는 수집하지 못합니다. 지난 실행은 3시간 이내 한 번만 보충하며 지난 날짜를 연속 재실행하지 않습니다.</li></ul></div><div class="card" style="margin-top:20px"><h2>제공사 선택</h2><p class="body-small">이번 버전은 Twelve Data를 사용합니다. 한국 일봉과 미국·글로벌 자료를 같은 REST 방식으로 처리하고, 계좌 주문을 연결하지 않아도 시작할 수 있습니다.</p><p class="notice-text">한국 EOD·재무·통계는 유료 요금제와 종목별 지원 확인이 필요합니다. 개인 사용과 회사/앱 배포 권한은 다릅니다. 결제·계약은 자동으로 진행하지 않습니다.</p><a href="https://twelvedata.com/pricing" target="_blank" rel="noopener">요금·권한 확인 ↗</a> · <a href="https://twelvedata.com/exchanges?country=South+Korea" target="_blank" rel="noopener">한국 시장 범위 ↗</a></div></div></div>'+
   '<div class="card" style="margin-top:20px"><div class="card-header"><div><h2>최신 분석 결과</h2><div class="card-sub">'+esc(latest?latest.analysisStatus+' · 평가일 '+latest.asOf:'수집 후 상태·결과 새로고침을 누르세요.')+'</div></div><div class="actions"><button class="btn" data-action="read-export" '+(!latest?'disabled':'')+'>분석 JSON</button><button class="btn primary" data-action="read-apply" '+(!latest?'disabled':'')+'>기업·거래량 화면에서 보기</button></div></div>'+
   (rows.length?'<div class="table-wrap"><table><thead><tr><th>기업 / 시장</th><th>기업 /70</th><th>기술 /30</th><th>총점 /100</th><th>PER</th><th>PBR</th><th>거래량 배수</th><th>가격일 / 관측일</th><th>판정·확인 항목</th></tr></thead><tbody>'+rows.map(r=>'<tr><td><strong>'+esc(r.name)+'</strong><br><span class="body-small">'+esc(r.symbol)+' · '+esc(r.market)+'</span></td><td>'+n(r.fundamental)+'</td><td>'+n(r.technical)+'</td><td><strong>'+n(r.total)+'</strong></td><td>'+n(r.metrics.per)+'</td><td>'+n(r.metrics.pbr)+'</td><td>'+n(r.volumeRatio)+'배</td><td>'+esc(r.lastPriceDate)+'<br>'+esc(r.observedAt?.slice(0,10))+'</td><td>'+esc(r.candidate?'조건 통과 · 검토 후보':r.eligible?'진입 조건 미달':'평가 제한')+'<br><span class="notice-text">'+esc(r.reasons.join(' / '))+'</span></td></tr>').join('')+'</tbody></table></div>':'<div class="empty">저장된 점수 결과가 없습니다. Node.js 설치 여부와 수집 기록을 확인하세요.</div>')+
   (latest?.failures?.length?'<p class="notice-text">이번 실행 미수집: '+esc(latest.failures.map(f=>f.symbol+' '+f.error).join(' / '))+'</p>':'')+'<p class="notice-text">가치 순위는 지정한 분석 종목 안에서만 비교합니다. 표본이 적으면 전체 시장 저평가 순위로 해석할 수 없습니다. 과거 재무의 실제 공개 시점이 미확인인 API 자료는 백테스트에서 차단합니다. 최신 점수는 수집 관측일 이후 현재 분석용입니다.</p></div>'+
   '<div class="card" style="margin-top:20px"><h2>수집 기록</h2><div class="table-wrap"><table><thead><tr><th>시작</th><th>시장 / 방식</th><th>상태</th><th>완료</th><th>credits</th><th>메모</th></tr></thead><tbody>'+jobs.map(j=>'<tr><td>'+esc(j.startedAt)+'</td><td>'+esc(j.market)+' / '+esc(j.reason)+'</td><td>'+esc(j.phase)+'</td><td>'+n(j.completed)+' / '+n(j.total)+'</td><td>'+n(j.credits)+'</td><td>'+esc(j.note)+'</td></tr>').join('')+'</tbody></table></div><p class="notice-text">최근 기록·분석 보고서 30개 보관. 실패하면 기존 결과를 보존하고 성공 종목과 실패 종목을 구분합니다. 부분 성공은 이번 시장의 성공 종목만 교체합니다.</p></div>';
  }
  function metric(label,value,note){return '<div class="metric"><div class="metric-label">'+label+'</div><div class="metric-value" style="font-size:20px">'+esc(value)+'</div><div class="metric-note">'+esc(note)+'</div></div>';}
- async function refresh(){state.status=await call('status');state.latest=await call('latest');}
+ async function rankingCall(market,strategy,csv=false){const response=await fetch('/api/research/rankings?market='+market+'&strategy='+strategy+(csv?'&format=csv':''),{headers:{'X-Atlas-Session':window.ATLAS_SESSION},cache:'no-store'});if(!response.ok)throw Error('TOP10 요청 실패');if(csv)return response.blob();const result=await response.json();return result.data;}
+ async function refresh(){state.status=await call('status');state.latest=await call('latest');state.rankings=await Promise.all(['KR','US'].flatMap(m=>['value','legacy_technical','alpha_filters'].map(s=>rankingCall(m,s))));}
  async function perform(work){if(state.busy)return;state.busy=true;state.message='';window.AtlasRefresh?.();try{await work();}catch(e){state.message=e.message;}finally{state.busy=false;window.AtlasRefresh?.();}}
  document.addEventListener('submit',event=>{
   if(event.target.id!=='read-config')return;event.preventDefault();const f=new FormData(event.target),body=Object.fromEntries(f);
@@ -276,6 +407,7 @@
   perform(async()=>{
    if(action==='read-refresh')await refresh();
    else if(action==='read-run'){const result=await call('run',{market:b.dataset.market||'ALL'});state.message='수집 작업을 시작했습니다. 완료 후 상태·결과 새로고침을 누르세요. 작업 '+result.jobId;state.status=await call('status');}
+   else if(action==='read-ranking-export'){const blob=await rankingCall(b.dataset.market,b.dataset.strategy,true),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='project03-'+b.dataset.market+'-'+b.dataset.strategy+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
    else if(action==='read-apply'){if(!state.latest)throw Error('최신 자료가 없습니다.');window.AtlasLoadResearch(state.latest);}
    else if(action==='read-export'){if(!state.latest)throw Error('최신 자료가 없습니다.');const blob=new Blob([JSON.stringify(state.latest.data,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='atlas-api-analysis-'+state.latest.asOf+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
   });

@@ -5,6 +5,7 @@ import json
 root = Path(__file__).resolve().parent
 css = (root / 'src/style.css').read_text()
 engine = (root / 'src/engine.js').read_text()
+engine += '\n' + (root / 'src/research.js').read_text()
 app = (root / 'src/read-ui.js').read_text() + '\n' + (root / 'src/app.js').read_text()
 for value in (engine, app):
     if '</script' in value.lower():

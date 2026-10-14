@@ -93,6 +93,18 @@ class MarketTests(unittest.TestCase):
     self.assertEqual(e.exception.code,403)
    with self.assertRaises(urllib.error.HTTPError):urllib.request.urlopen(base+'/api/read/status')
   finally:server.shutdown();server.server_close();thread.join()
+ def test_master_batch_publishes_six_lists_and_excludes_managed(self):
+  from market_data import write_json
+  markets={}
+  for market,symbol,mic,close in [('KR','005930','XKRX','2026-10-06'),('US','AAPL','XNAS','2026-10-05')]:
+   markets[market]=dict(complete=False,source='TEST ONLY',calendarSource='TEST CALENDAR',asOf='2026-10-06',expectedMarketDate=close,entries=[dict(id=market+'-'+symbol+'-'+mic,symbol=symbol,mic=mic,status='active',statusAsOf='2026-10-06',securityType='Common Stock',source='TEST STATUS',dividend=dict(confirmed=True,availableAt='2026-10-06',asOf=close,yield_ignored=0,**{'yield':.03,'yearsPaid':3,'payoutRatio':.4,'source':'TEST DIVIDEND'}))])
+  markets['KR']['entries'].append(dict(id='KR-000660-XKRX',symbol='000660',mic='XKRX',status='managed',statusAsOf='2026-10-06',securityType='Common Stock',source='TEST STATUS'))
+  write_json(self.c.directory/'universe.json',dict(schemaVersion=1,markets=markets));self.c.save_config(dict(universeMode='master'));self.runjob()
+  latest=self.c.latest();self.assertEqual(len(latest['analysis']['rankings']),6)
+  stored=json.loads((self.c.directory/'rankings.json').read_text());self.assertEqual(len(stored['attempts']),6)
+  self.assertFalse(any(params['symbol']=='000660' for _,params in self.calls))
+  self.assertEqual(self.c.status()['jobs'][0]['phase'],'PARTIAL')
+  self.assertTrue(any(r['strategy']=='alpha_filters' and r['rows'] for r in latest['analysis']['rankings']))
  def test_config_validation_and_process_lock(self):
   for changes in [dict(morning='25:00'),dict(creditsPerMinute=8),dict(symbols=[dict(market='KR',symbol='005930',mic='XNAS')]),dict(frequency=True)]:
    with self.assertRaises(DataError):self.c.save_config(changes)

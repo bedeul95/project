@@ -10,6 +10,7 @@ import json
 import secrets
 from broker import Broker, BrokerError
 from market_data import Collector, DataError
+from rankings_store import load as load_ranking, csv_export
 
 ROOT = Path(__file__).resolve().parent
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -45,7 +46,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             try:
                 broker=getattr(self.server,'broker',None)
                 collector=getattr(self.server,'collector',None)
-                if path=='/api/read/status' and collector:result=collector.status()
+                if path=='/api/research/rankings' and collector:
+                    result=load_ranking(collector.directory,get('market'),get('strategy'),get('as_of'))
+                    if get('format')=='csv':self.respond(csv_export(result),'text/csv; charset=utf-8');return
+                elif path=='/api/read/status' and collector:result=collector.status()
                 elif path=='/api/read/latest' and collector:result=collector.latest()
                 elif path=='/api/status':result=broker.status() if broker else {'provider':'KIS','enabled':False,'note':'계좌·주문 연결 비활성'}
                 elif not broker:self.respond({'ok':False,'error':'계좌·주문 API 비활성'},status=403);return

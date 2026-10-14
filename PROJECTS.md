@@ -9,7 +9,7 @@
 | --- | --- | --- | --- |
 | 01 · 인프라 자동화·자산·IP 관리 | [ChatGPT-Project01](https://github.com/bedeul95/ChatGPT-Project01) | Project01-Infra-Automation | 최신 코드 PR #11 / 20261008.9; main은 20260928.6 |
 | 02 · BOTC 자동 이야기꾼 게임 | [project002](https://github.com/bedeul95/project002) | Project02-BOTC-AutoST | main / TypeScript 게임 서버 + Expo |
-| 03 · 퀀트 조회·분석 플랫폼 | [project](https://github.com/bedeul95/project) | Project03-Quant-Research | 문서/원본 분석; 소스 Git 이관 대기 |
+| 03 · 퀀트 조회·분석 플랫폼 | [project](https://github.com/bedeul95/project) | Project03-Quant-Research | 실행 소스/6개TOP10 구현; 실제 전체시장 feed 연결 대기 |
 | 04 · AMS Syslog 전송·로그 보관 | [project-kiwi](https://github.com/bedeul95/project-kiwi) | Project04-AMS-Forwarding | 원본 AMS 4.1 스크립트와 설정 예제 |
 
 ## 공통 문서 구조

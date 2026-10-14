@@ -77,3 +77,13 @@ test('조회 설정은 키를 로컬 서버로만 보내고 분석 결과를 기
  await new Promise(r=>setImmediate(r));const req=calls.find(x=>x.url.endsWith('/config'));assert.equal(JSON.parse(req.options.body).apiKey,'secret-test');assert.ok(!JSON.stringify(h.state()).includes('secret-test'));
  h.click('read-apply');await new Promise(r=>setImmediate(r));assert.equal(h.state().asOf,'2026-10-06');assert.match(h.html(),/좋은 기업을/);
 });
+test('six ranking cards render unknown signals, scope and escaped stock names',async()=>{
+ const h=harness(),calls=[];h.context.ATLAS_SESSION='s'.repeat(32);
+ h.context.fetch=async(url,options)=>{calls.push({url,options});const params=new URL(url,'http://test').searchParams;let data={configured:false,nodeAvailable:true,config:{symbols:[]},jobs:[]};
+  if(url.endsWith('/latest'))data=null;
+  if(url.startsWith('/api/research/rankings'))data={market:params.get('market'),strategy:params.get('strategy'),status:'partial',title:'조회 성공 표본 TOP 10 (전체시장 순위 아님)',coverage_rate:.5,eligible_count:20,as_of_market_close:'2026-10-02',rows:[{rank:1,name:'<unsafe>',symbol:'005930',exchange:'XKRX',score:40,technical_30:20,fundamental_70:null,risk_level:'평가불가',unknown_signal_count:2,score_upper_bound:60,signal_details:[{feature_name:'RSI',status:'matched'}],risk_reasons:['자료부족']}]};
+  return {ok:true,json:async()=>({ok:true,data})};};
+ h.click('page',{page:'research'});for(let i=0;i<10;i++)await new Promise(r=>setImmediate(r));
+ assert.equal((h.html().match(/<h3>(KR|US) ·/g)||[]).length,6);assert.match(h.html(),/판별불가 2개/);assert.match(h.html(),/전체시장 순위 아님/);assert.match(h.html(),/&lt;unsafe&gt;/);assert.ok(!h.html().includes('<unsafe>'));
+ assert.equal(calls.filter(c=>c.url.startsWith('/api/research/rankings')).length,6);assert.ok(calls.every(c=>c.options.headers['X-Atlas-Session']===h.context.ATLAS_SESSION));
+});

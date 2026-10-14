@@ -1,7 +1,7 @@
 # Project03 — KR/US × 3개 전략 TOP 10 산출 명세
 
 - 문서일: 2026-10-14
-- 상태: **요구사항/설계만 등록**. 이 Git 저장소에 계산 소스와 전체시장 데이터 수집기가 이관되지 않았으므로 **실제 랭킹/점수 미산출**.
+- 상태: 2026-10-15 실행 소스/6개 순위 계산·API·UI·MCP 구현. 실제 최신 전체시장 feed/시세는 미검증. 구현 계약은 [UNIVERSE](../guide/UNIVERSE.md), 검증은 [TESTING](../../TESTING.md) 참조.
 - 기준 버전: 원본 패키지 1.4.0 / 기존 engine 1.3.0 (버전 혼용 표시 유지)
 - 구현 선행조건: [데이터/검증 계약](DATA_PIPELINE_AND_VALIDATION.md), [개발 로드맵](ROADMAP.md)
 - 참고 후보: [기존 답변의 미검증 후보](../reference/PROVISIONAL_CANDIDATES_20261014.md)
@@ -78,7 +78,7 @@
 
 `GET /api/research/rankings?market=KR|US&strategy=value|legacy_technical|alpha_filters&as_of=YYYY-MM-DD`
 
-응답의 필수 필드(아직 실제 API 구현 아님):
+응답의 필수 필드(API 구현 완료 · 세션 필요):
 `status` = verified | partial | unavailable, `market`, `strategy`, `as_of_market_close`, `generated_at`, `universe_count`, `eligible_count`, `coverage_rate`, `exclude_reasons`, `algorithm_version`, `source_provenance`, `rows[0..9]`.
 각 row: `rank`, `name`, `symbol`, `exchange`, `score`, `score_scale`, `fundamental_70`, `technical_30`, `total_100`, `signal_details`, `risk_level`, `risk_reasons`, `data_as_of`.
 
@@ -93,3 +93,7 @@
 5. 모바일/데스크톱에서 '실측 데이터'와 '미검증 후보' 오인 불가.
 6. 매일 1~2회 예약 분석은 공급자 호출 총 1~2회가 아님. API 비용/예산 제한 및 비밀값 미노출 검증.
 7. 계좌/실거래 주문 및 코인 발행·판매·배당 실행은 이 기능에 포함되지 않음(별도 승인·법률 검토). 
+
+## 1.5.0 구현 게이트/차이
+
+verified 최소수치는100%로 정했습니다. 금융업·신규상장·미확보자료를 포함한 유니버스가 완전평가에 도달하지 않으면 보수적으로 partial입니다. 판별불가 알파 신호가 있으면 확인된 신호점수는 하한이고 상한/unknown_count를 별도로 표시합니다. 기술 목록의 기업 자료 누락은 null/위험평가불가입니다. 저평가는100% 구성자료와200일 이내 결산을 요구합니다. 값의 업종 비교 fallback은 기존 엔진 동작을 보존하고 근거에 표시합니다. 실측 거래대금 미제공시 종가×거래량 근사 표시. 실제 배당/기업행동·거래상태 feed 연결은 미완료입니다.

@@ -5,12 +5,12 @@
   "actualRepository": "bedeul95/project",
   "targetRepositoryName": "Project03-Quant-Research",
   "repositoryRenameStatus": "pending-settings-access",
-  "branch": "main",
-  "baselineCommit": "803fdec842d75d7f543c608e033e235bece0058a",
-  "version": "원본 패키지 1.4.0 / 계산 엔진 1.3.0",
-  "updatedAt": "2026-10-14",
-  "developmentBranch": "main",
-  "sourceStatus": "package-reviewed-not-imported",
+  "branch": "feature/project03-top10-20261015",
+  "baselineCommit": "18395fc723794377b36cb16093aa3634edd9a964",
+  "version": "research/MCP 1.5.0; scoring formulas 1.3.0",
+  "updatedAt": "2026-10-15",
+  "developmentBranch": "feature/project03-top10-20261015",
+  "sourceStatus": "imported-sha256-verified",
   "documents": {
     "index": "docs/README.md",
     "overview": "docs/guide/OVERVIEW.md",
@@ -23,11 +23,16 @@
     "symbols": "docs/reference/SYMBOLS.md",
     "top10Scoring": "docs/development/TOP10_SCORING_SPEC.md",
     "dataValidation": "docs/development/DATA_PIPELINE_AND_VALIDATION.md",
-    "provisionalCandidates": "docs/reference/PROVISIONAL_CANDIDATES_20261014.md"
+    "provisionalCandidates": "docs/reference/PROVISIONAL_CANDIDATES_20261014.md",
+    "universe": "docs/guide/UNIVERSE.md"
   },
   "featureStatus": {
-    "krUsTop10x3": "spec-only-not-implemented",
+    "krUsTop10x3": "implemented-fixture-validated",
     "stockData": "not-live-verified",
-    "previousCandidates": "unverified-reference-only"
-  }
+    "previousCandidates": "unverified-reference-only",
+    "fullMarketFeed": "external-master-required-not-live-connected",
+    "macOSOperation": "not-verified"
+  },
+  "targetBranch": "main",
+  "publicationStatus": "review-branch-main-pending"
 }

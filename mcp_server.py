@@ -9,7 +9,7 @@ from pathlib import Path
 import stat
 import sys
 
-VERSION = '1.4.0'
+VERSION = '1.5.0'
 PROTOCOL = '2025-06-18'
 LEGACY_VERSIONS = ('2024-11-05', '2025-03-26', PROTOCOL)
 MAX_MESSAGE = 65536
@@ -44,6 +44,9 @@ def tool(name, description, properties=None, required=None):
 
 
 TOOLS = [
+    tool('atlas_top10', '저장된 KR/US × 세 전략 TOP10. 출처·커버리지·과거결과 표시. 새 조회/주문 없음.', {
+        'market': {'type':'string','enum':['KR','US']},
+        'strategy': {'type':'string','enum':['value','legacy_technical','alpha_filters']}}, ['market','strategy']),
     tool('atlas_status', '저장된 보고서와 수집 기록의 상태. 서버 생존/인증 상태를 확인하는 도구는 아닙니다.'),
     tool('atlas_rankings', '저장된 기업70+기술30 점수 순위. 지정 목록 안의 비교이며 시장 전체 순위가 아닙니다.', {
         'market': {'type': 'string', 'enum': ['ALL', 'KR', 'US'], 'default': 'ALL'},
@@ -66,7 +69,7 @@ class Reader:
 
     def read(self, name):
         # Tool arguments cannot select a path. Config, cache and broker files are never opened.
-        if name not in ('latest.json', 'collection-state.json'):
+        if name not in ('latest.json', 'collection-state.json', 'rankings.json'):
             raise ToolError('허용하지 않는 자료입니다.')
         try:
             fd = os.open(self.directory / name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -124,6 +127,9 @@ class Reader:
         if definition is None:
             raise ToolError('허용하지 않는 도구입니다. 조회 전용 도구만 제공합니다.')
         validate_arguments(arguments, definition['inputSchema'])
+        if name == 'atlas_top10':
+            from rankings_store import select
+            return select(self.read('rankings.json') or {},arguments['market'],arguments['strategy'],today=self.today())
         if name == 'atlas_collection_history':
             state = self.read('collection-state.json') or {}
             jobs = state.get('jobs', [])

@@ -111,7 +111,7 @@ class ProtocolTests(unittest.TestCase):
             result = server.handle(self.request('initialize', {'protocolVersion': '2099-01-01'}))
             self.assertEqual(result['result']['protocolVersion'], '2025-06-18')
             self.assertIsNone(server.handle({'jsonrpc': '2.0', 'method': 'notifications/initialized'}))
-            self.assertEqual(len(server.handle(self.request('tools/list'))['result']['tools']), 5)
+            self.assertEqual(len(server.handle(self.request('tools/list'))['result']['tools']), 6)
             self.assertTrue(server.handle(self.request('tools/call', {'name': 'submit_order'}))['result']['isError'])
             self.assertIn('error', server.handle(self.request('initialize', {'protocolVersion': '2025-06-18'})))
             self.assertEqual(server.handle([])['error']['code'], -32600)
@@ -131,7 +131,7 @@ class ProtocolTests(unittest.TestCase):
             self.assertEqual(len(lines), 5)
             self.assertEqual(lines[0]['error']['code'], -32700)
             self.assertEqual(lines[1]['error']['code'], -32600)
-            self.assertEqual(len(lines[3]['result']['tools']), 5)
+            self.assertEqual(len(lines[3]['result']['tools']), 6)
             self.assertFalse(json.loads(lines[4]['result']['content'][0]['text'])['reportAvailable'])
 
     def test_real_installer_smoke_test(self):
