@@ -19,3 +19,6 @@
 루트의 [README](../README.md)와 [PROJECTS](../PROJECTS.md)를 진입점으로 사용한다.
 기존 CODE_STRUCTURE/DEVELOPMENT 경로는 새 문서로 안내하는 호환 문서다.
 번호가 붙은 기존 설계/운영 가이드는 배포 생성기와의 링크 계약 때문에 원래 경로에 보존한다.
+
+- [상태 마스터·정규화 데이터 계약](guide/UNIVERSE.md)
+- [실제 검증 범위](../TESTING.md)
